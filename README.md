@@ -1,24 +1,30 @@
-# Agent eBay – démarrage
+# Mon agent eBay — version de départ
 
-Prototype local en Python : analyse un catalogue fournisseur CSV, calcule une marge estimée et filtre les produits.
-Il ne publie rien sur eBay et ne passe aucune commande automatiquement.
+Application web Streamlit utilisable depuis un navigateur Android.
 
-## Installation
-Python 3.10+
+## Lancer localement
 ```bash
-python -m venv .venv
-# Windows : .venv\\Scripts\\activate
-# macOS/Linux : source .venv/bin/activate
 pip install -r requirements.txt
+streamlit run app.py
 ```
 
-## Utilisation
-Copier `products_example.csv` vers `products.csv`, renseigner les prix/coûts réels, puis :
-```bash
-python agent.py --input products.csv --output candidates.csv --min-margin 5 --min-rate 20
-```
+## Déployer sur Render
+1. Envoyer tous les fichiers de ce dossier dans le dépôt GitHub `mon-agent-ebay`.
+2. Sur Render, créer un nouveau service Web et connecter le dépôt.
+3. Render détecte `render.yaml` ; vérifier les commandes puis lancer le déploiement.
+4. Ouvrir l'URL fournie par Render depuis Android.
 
-`min-margin` = bénéfice estimé minimum en euros ; `min-rate` = taux de marge minimum en % du prix de vente.
+Le forfait gratuit peut s'endormir ou avoir des limites : il ne garantit pas une exécution continue 24 h/24.
 
-Les frais eBay et frais de paiement sont des paramètres estimatifs : vérifie les frais applicables à ta catégorie et ton compte avant toute décision.
-Avant toute publication, vérifie le droit de vendre le produit, le stock, les délais, les retours et l'accord écrit du fournisseur.
+## État réel des fonctions
+- Disponible : import CSV, calcul estimatif des frais/marges, filtrage de candidats, export CSV et brouillon d'annonce.
+- À développer/configurer : recherche automatique via sources autorisées, API eBay OAuth, fournisseurs, inventaire, commandes, alertes et publication.
+
+Aucune annonce n'est publiée et aucune commande n'est passée par cette version.
+
+## Sécurité et conformité
+- Ne jamais déposer de mot de passe, jeton OAuth ou clé API dans GitHub.
+- Utiliser les variables d'environnement/secrets du serveur.
+- Obtenir l'accord du grossiste pour le dropshipping et vérifier délais, retours et stock.
+- Ne pas acheter chez un détaillant après une vente eBay pour faire livrer le client.
+- Tester en mode brouillon/sandbox avant d'activer une action réelle.
