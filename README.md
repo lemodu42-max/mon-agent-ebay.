@@ -1,30 +1,41 @@
-# Mon agent eBay — version de départ
+# Mon agent eBay — recherche d'annonces v2
 
-Application web Streamlit utilisable depuis un navigateur Android.
+Application Streamlit utilisable depuis un navigateur Android.
 
-## Lancer localement
+## Fonctions incluses
+- Tableau de bord.
+- Recherche d'annonces actives eBay via la Browse API (mot-clé, marketplace, prix affichés, frais de livraison visibles, lien).
+- Import d'un catalogue fournisseur CSV et estimation de marge.
+- Brouillon d'annonce exportable.
+
+## Limites importantes
+La Browse API retourne des annonces actives. Elle ne donne pas, à elle seule, le nombre de ventes réalisées ni la preuve qu'un article est demandé. L'API Marketplace Insights qui fournit des données d'articles vendus est en accès restreint et n'est pas ouverte aux nouveaux utilisateurs selon la documentation eBay consultée.
+Cette version ne trouve pas automatiquement des fournisseurs grossistes, ne publie pas d'annonces et ne passe aucune commande.
+
+## Déploiement Render
+Build command:
 ```bash
 pip install -r requirements.txt
-streamlit run app.py
+```
+Start command:
+```bash
+streamlit run app.py --server.port $PORT --server.address 0.0.0.0
 ```
 
-## Déployer sur Render
-1. Envoyer tous les fichiers de ce dossier dans le dépôt GitHub `mon-agent-ebay`.
-2. Sur Render, créer un nouveau service Web et connecter le dépôt.
-3. Render détecte `render.yaml` ; vérifier les commandes puis lancer le déploiement.
-4. Ouvrir l'URL fournie par Render depuis Android.
+Dans Render > service > Environment, ajouter :
+- `EBAY_CLIENT_ID` : App ID / Client ID de l'application eBay
+- `EBAY_CLIENT_SECRET` : Cert ID / Client Secret de l'application eBay
 
-Le forfait gratuit peut s'endormir ou avoir des limites : il ne garantit pas une exécution continue 24 h/24.
+Ne jamais mettre ces secrets dans GitHub. Utiliser les identifiants Production pour les annonces eBay réelles ; Sandbox sert uniquement aux tests. Le code sélectionne l'environnement Sandbox uniquement si la case correspondante est cochée.
 
-## État réel des fonctions
-- Disponible : import CSV, calcul estimatif des frais/marges, filtrage de candidats, export CSV et brouillon d'annonce.
-- À développer/configurer : recherche automatique via sources autorisées, API eBay OAuth, fournisseurs, inventaire, commandes, alertes et publication.
-
-Aucune annonce n'est publiée et aucune commande n'est passée par cette version.
+## Créer les identifiants
+Créer une application dans le portail développeur eBay : https://developer.ebay.com/
+La recherche Browse API utilise un Application access token via Client Credentials et le scope `https://api.ebay.com/oauth/api_scope`.
 
 ## Sécurité et conformité
-- Ne jamais déposer de mot de passe, jeton OAuth ou clé API dans GitHub.
-- Utiliser les variables d'environnement/secrets du serveur.
-- Obtenir l'accord du grossiste pour le dropshipping et vérifier délais, retours et stock.
-- Ne pas acheter chez un détaillant après une vente eBay pour faire livrer le client.
-- Tester en mode brouillon/sandbox avant d'activer une action réelle.
+- La recherche Browse API est une recherche d'annonces actives, pas un historique de ventes.
+- Les prix affichés et frais de livraison peuvent changer.
+- Vérifier la demande réelle, les frais eBay applicables, la TVA, les retours et le stock avant décision.
+- N'utiliser que des fournisseurs grossistes qui acceptent explicitement le dropshipping.
+- Ne pas acheter chez un détaillant après une vente eBay pour expédier au client.
+- Aucune annonce n'est publiée et aucune commande n'est passée par cette version.

@@ -1,6 +1,8 @@
-import streamlit as st
+import os
+import base64
+import requests
 import pandas as pd
-from pathlib import Path
+import streamlit as st
 
 st.set_page_config(page_title="Mon agent eBay", page_icon="🛍️", layout="wide")
 
@@ -52,6 +54,57 @@ def analyze(df, min_profit, min_margin):
     })
     return df.sort_values(["candidate", "estimated_profit"], ascending=[False, False])
 
+def ebay_application_token(client_id, client_secret, sandbox=False):
+    if not client_id or not client_secret:
+        raise ValueError("Ajoute EBAY_CLIENT_ID et EBAY_CLIENT_SECRET dans les variables d'environnement Render.")
+    credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    host = "https://api.sandbox.ebay.com" if sandbox else "https://api.ebay.com"
+    response = requests.post(
+        f"{host}/identity/v1/oauth2/token",
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={
+            "grant_type": "client_credentials",
+            "scope": "https://api.ebay.com/oauth/api_scope",
+        },
+        timeout=25,
+    )
+    response.raise_for_status()
+    return response.json()["access_token"], host
+
+def search_ebay_active_items(keyword, marketplace="EBAY_FR", limit=30, sandbox=False):
+    client_id = os.getenv("EBAY_CLIENT_ID", "")
+    client_secret = os.getenv("EBAY_CLIENT_SECRET", "")
+    token, host = ebay_application_token(client_id, client_secret, sandbox)
+    response = requests.get(
+        f"{host}/buy/browse/v1/item_summary/search",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-EBAY-C-MARKETPLACE-ID": marketplace,
+            "Accept-Language": "fr-FR",
+        },
+        params={"q": keyword, "limit": limit, "sort": "price"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    rows = []
+    for item in payload.get("itemSummaries", []):
+        price = item.get("price", {})
+        shipping = (item.get("shippingOptions") or [{}])[0].get("shippingCost", {})
+        rows.append({
+            "Titre": item.get("title", ""),
+            "Prix affiché": float(price.get("value", 0) or 0),
+            "Devise": price.get("currency", "EUR"),
+            "Livraison affichée": float(shipping.get("value", 0) or 0),
+            "Vendeur": (item.get("seller") or {}).get("username", ""),
+            "État": item.get("condition", ""),
+            "Lien": item.get("itemWebUrl", ""),
+        })
+    return pd.DataFrame(rows), payload.get("total", 0)
+
 def template():
     return pd.DataFrame([{
         "sku": "EX-001", "title": "Exemple accessoire maison",
@@ -64,7 +117,7 @@ def template():
 st.title("🛍️ Mon agent eBay")
 st.caption("Tableau de bord de préparation et de contrôle de produits — accessible depuis Android.")
 st.warning(
-    "Mode sécurisé de départ : cette application analyse les données importées. "
+    "Mode sécurisé : l'application analyse les catalogues et consulte les annonces actives eBay. "
     "Elle ne publie aucune annonce, ne passe aucune commande et ne modifie aucun stock."
 )
 
@@ -73,31 +126,67 @@ with st.sidebar:
     min_profit = st.number_input("Bénéfice minimum estimé (€)", min_value=0.0, value=5.0, step=1.0)
     min_margin = st.number_input("Marge minimum (%)", min_value=0.0, value=20.0, step=1.0)
 
-pages = st.tabs(["Vue d'ensemble", "Analyse produits", "Préparer une annonce", "Suivi commandes", "Configuration"])
+pages = st.tabs(["Vue d'ensemble", "Recherche eBay", "Analyse produits", "Préparer une annonce", "Suivi commandes", "Configuration"])
 
 with pages[0]:
     st.subheader("État du projet")
     a, b, c = st.columns(3)
     a.metric("Analyse de catalogue", "Disponible")
-    b.metric("Connexion eBay", "À configurer")
-    c.metric("Fournisseurs", "À connecter")
+    b.metric("Recherche annonces actives", "À configurer")
+    c.metric("Connexion vendeur eBay", "Non connectée")
     st.markdown("""
-    **Modules prévus dans le projet**
-    - Recherche de tendances eBay et étude des ventes.
-    - Comparaison de fournisseurs grossistes et contrôle des accords.
-    - Calcul des coûts, frais et marges.
-    - Préparation des brouillons d'annonces.
-    - Synchronisation des stocks et suivi des commandes, après connexion autorisée.
-    - Alertes en cas de rupture, retard ou marge insuffisante.
+    **Modules du projet**
+    - Recherche d'annonces actives eBay par mot-clé.
+    - Comparaison des prix affichés et des frais de livraison visibles.
+    - Import d'un catalogue grossiste et calcul de marges.
+    - Préparation de brouillons d'annonces.
+    - Connexion vendeur, inventaire, commandes et publication : à développer séparément.
     """)
-    st.info("Les modules marqués « à configurer » nécessitent des accès officiels et des tests avant toute automatisation.")
+    st.info("Les prix des annonces actives ne prouvent pas qu'un produit se vend. Il faut des données de ventes réalisées pour mesurer la demande.")
 
 with pages[1]:
-    st.subheader("Analyser un catalogue CSV")
+    st.subheader("Rechercher des annonces actives sur eBay")
+    st.write("Cette recherche consulte les annonces actuellement visibles sur la marketplace française.")
+    keyword = st.text_input("Produit ou mot-clé", placeholder="ex. organiseur de tiroir")
+    market = st.selectbox("Marketplace", ["EBAY_FR", "EBAY_DE", "EBAY_IT", "EBAY_ES", "EBAY_GB"])
+    limit = st.slider("Nombre de résultats", 5, 50, 25, 5)
+    sandbox = st.checkbox("Utiliser l'environnement Sandbox (tests)", value=False)
+    if st.button("Rechercher sur eBay", type="primary"):
+        if not keyword.strip():
+            st.error("Saisis un mot-clé.")
+        else:
+            try:
+                with st.spinner("Recherche des annonces eBay…"):
+                    results, total = search_ebay_active_items(keyword.strip(), market, limit, sandbox)
+                st.success(f"{len(results)} annonces récupérées. eBay indique {total} résultats au total.")
+                if results.empty:
+                    st.info("Aucune annonce trouvée pour ce mot-clé.")
+                else:
+                    st.dataframe(
+                        results,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={"Lien": st.column_config.LinkColumn("Ouvrir sur eBay")}
+                    )
+                    st.download_button(
+                        "Télécharger les résultats CSV",
+                        results.to_csv(index=False).encode("utf-8"),
+                        "recherche_ebay.csv",
+                        "text/csv"
+                    )
+            except requests.HTTPError as e:
+                detail = e.response.text[:1000] if e.response is not None else str(e)
+                st.error(f"Erreur API eBay : {detail}")
+            except Exception as e:
+                st.error(str(e))
+    st.caption("Limite importante : Browse API renvoie des annonces actives et leurs prix, pas l'historique des ventes réalisées ni les produits les plus vendus.")
+
+with pages[2]:
+    st.subheader("Analyser un catalogue fournisseur CSV")
     sample = template()
     st.download_button("Télécharger le modèle CSV", sample.to_csv(index=False).encode("utf-8"),
                        "modele_produits.csv", "text/csv")
-    uploaded = st.file_uploader("Importer ton fichier CSV", type=["csv"])
+    uploaded = st.file_uploader("Importer ton fichier CSV fournisseur", type=["csv"])
     if uploaded:
         try:
             result = analyze(pd.read_csv(uploaded), min_profit, min_margin)
@@ -111,10 +200,10 @@ with pages[1]:
         except Exception as e:
             st.error(str(e))
     else:
-        st.write("Télécharge le modèle, remplis-le avec les données réelles de tes fournisseurs, puis importe-le.")
+        st.write("Importe les prix réels d'un grossiste et vérifie l'accord de dropshipping avant de retenir un produit.")
         st.dataframe(sample, use_container_width=True, hide_index=True)
 
-with pages[2]:
+with pages[3]:
     st.subheader("Préparer une annonce (brouillon)")
     st.caption("Cette page ne publie rien sur eBay.")
     title = st.text_input("Titre du produit")
@@ -129,19 +218,20 @@ with pages[2]:
             st.code(draft)
             st.download_button("Télécharger le brouillon TXT", draft, "brouillon_annonce.txt", "text/plain")
 
-with pages[3]:
-    st.subheader("Suivi des commandes")
-    st.info("Le suivi automatique sera activé après connexion à l'API eBay. Pour l'instant, aucune commande n'est lue ni modifiée.")
-    st.write("Tu pourras ensuite afficher le numéro de commande, le statut de paiement, l'expédition et le suivi.")
-
 with pages[4]:
+    st.subheader("Suivi des commandes")
+    st.info("Le suivi automatique sera activé après une connexion vendeur eBay OAuth. Pour l'instant, aucune commande n'est lue ni modifiée.")
+
+with pages[5]:
     st.subheader("Connexions et sécurité")
     st.markdown("""
-    **À fournir/configurer plus tard :**
-    1. Compte développeur eBay et application API (OAuth).
-    2. Autorisations eBay adaptées aux annonces, inventaires et commandes.
-    3. Fournisseurs grossistes ayant accepté par écrit le dropshipping.
-    4. Politiques eBay de livraison, paiement et retours.
-    5. Secrets stockés dans les variables d'environnement du serveur, jamais dans GitHub.
+    **Pour activer la recherche eBay :**
+    1. Crée une application dans le portail développeur eBay.
+    2. Récupère le Client ID (App ID) et le Client Secret (Cert ID) de l'environnement choisi.
+    3. Dans Render > ton service > Environment, ajoute `EBAY_CLIENT_ID` et `EBAY_CLIENT_SECRET`.
+    4. Redéploie le service. Ne colle jamais ces secrets dans GitHub ou dans une conversation.
+
+    La recherche publique d'annonces utilise un jeton Application OAuth (Client Credentials).
+    Elle ne connecte pas ton compte vendeur et ne permet pas de publier.
     """)
-    st.error("Ne saisis jamais ici ton mot de passe eBay, un code SMS ou une clé API. Ne les publie pas dans GitHub.")
+    st.error("Ne saisis jamais ici ton mot de passe eBay, un code SMS ou une clé API. Les clés doivent rester dans les variables secrètes de Render.")
